@@ -13,7 +13,7 @@ const char* mqtt_server1 = "test.mosquitto.org";
 
 
 //PINS
-//bumpers
+//bumpers, if the pin is LOW the bumper is active, pulled HIGH with internal pullups 
 const int PIN_BBL = D1; //pin for Bumper Back Left
 const int PIN_BBR = D2; //pin for Bumper Back RIght
 const int PIN_BFR = D5; //pin for Bumper Front Left
@@ -28,7 +28,7 @@ const int servo4 = D8; //extra servo - used for camera gimbal
 const int PIN_LED = D0; // LED lights
 
 
-char buffer1[20];//multiusage
+char buffer1[20]; //multiusage
 WiFiClient espClient;
 PubSubClient client(espClient); //MQTT
 
