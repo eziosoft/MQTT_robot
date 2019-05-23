@@ -5,25 +5,27 @@
 #include <ArduinoOTA.h>
 #include <Servo.h>
 
-const char* ssid = "Robot";
-const char* outTopic = "tank/out";
-const char* inTopic = "tank/in";
-const char* mqtt_server = "192.168.0.19";
+const char* ssid = "Robot"; //robot creates wifi hotspot when wifi connection is not configured
+const char* outTopic = "tank/out"; //MQTT topic for robot telemetry messages
+const char* inTopic = "tank/in"; //MQTT topic for control messages
+const char* mqtt_server = "192.168.0.19"; //my defauld MQTT server
 const char* mqtt_server1 = "test.mosquitto.org";
 
 
 //PINS
-//0-15 build in pull up
-//16 build in pull down
-const int PIN_BBL = D1;
-const int PIN_BBR = D2;
-const int PIN_BFR = D5;
-const int PIN_BFL = D6;
-const int servo1 = D4;
-const int servo2 = D3;
-const int servo3 = D7;
-const int servo4 = D8;
-const int PIN_LED = D0;
+//bumpers
+const int PIN_BBL = D1; //pin for Bumper Back Left
+const int PIN_BBR = D2; //pin for Bumper Back RIght
+const int PIN_BFR = D5; //pin for Bumper Front Left
+const int PIN_BFL = D6; //pin for Bumper Front Right
+
+const int servo1 = D4; //servo driving the wheel
+const int servo2 = D3; //servo driving the wheel
+
+const int servo3 = D7; //extra servo - used for camera gimbal
+const int servo4 = D8; //extra servo - used for camera gimbal
+
+const int PIN_LED = D0; // LED lights
 
 
 char buffer1[20];//multiusage
@@ -45,9 +47,6 @@ void setup() {
   pinMode(PIN_LED, OUTPUT);
 
   Serial.begin(115200);
-
-//  s3.attach(servo3);
-//  s4.attach(servo4);
 
   // Connecting WiFi
   WiFiManager wifiManager;
@@ -82,27 +81,28 @@ void setup() {
   ArduinoOTA.begin();
   //OTA END
 
+
+  //power on behaviour
   checkBumpers();
-  if (BFL == LOW) //connecto to server1 when front left bumper activated during power on
+  if (BFL == LOW) //connect to server1 when front left bumper activated during power on
   {
     client.setServer(mqtt_server1, 1883);
-    for (int i = 0; i < 5; i++) //blink 5 times with led
+    for (int i = 0; i < 5; i++) //blink 5 times with led to confirm
     {
       digitalWrite(PIN_LED, HIGH);
       delay(50);
       digitalWrite(PIN_LED, LOW);
       delay(50);
     }
-
   } else {
     client.setServer(mqtt_server, 1883);
   }
   client.setCallback(callback);
 
+  //blink led
   digitalWrite(PIN_LED, HIGH);
   delay(500);
   digitalWrite(PIN_LED, LOW);
-
 }
 
 
@@ -115,6 +115,7 @@ void loop() {
 
   checkBumpers();
 
+  //send telemetry every 200ms
   if (millis() % 200 == 0) {
     sprintf(buffer1, "T;%d;RSSI=%d;%d;%d;%d;%d", millis() / 1000, WiFi.RSSI(), BBL, BBR, BFR, BFL);
     client.publish(outTopic, buffer1);
@@ -129,6 +130,7 @@ void checkBumpers()
   BFR = digitalRead(PIN_BFR);
   BFL = digitalRead(PIN_BFL);
 
+  //turn on LED when bumpers are active
   digitalWrite(PIN_LED, !BBL || !BBR || !BFR || !BFL);
 }
 
@@ -141,6 +143,10 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
   Serial.println();
 
+  //control is done by 6 byte messages : [$][len][ch1][ch2][ch3][ch4]
+  // [$] - start of the frame
+  // [len] - number of bytes to read. in this case always 4
+  // [ch1][ch2][ch3][ch4] - control channels. Each channel has a range from 0 to 200. Middle is at 100 - servo stop
   if (length > 0) {
     if ((char)payload[0] == '$') {
 
@@ -153,12 +159,12 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
       if (ch1 == 0 && ch2 == 0) //stop
       {
-        s1.detach(); //detach to prevent servo drift
-        s2.detach();
+        s1.detach(); //detach to prevent servo drift when stationary and also saves power
+        s2.detach(); //detach to prevent servo drift when stationary and also saves power
       } else
       {
-        if (!s1.attached()) s1.attach(servo1);
-        if (!s2.attached()) s2.attach(servo2);
+        if (!s1.attached()) s1.attach(servo1); //attach servo when needed
+        if (!s2.attached()) s2.attach(servo2); //attach servo when needed
       }
 
       if (ch3 == 0 && ch4 == 0) //stop
@@ -192,9 +198,11 @@ void callback(char* topic, byte* payload, unsigned int length) {
         if (m2 < 0)m2 = 0;
       }
 
-      m1 = map(m1, -100, 100, 110, 70) + 3;
-      m2 = map(m2, -100, 100, 70, 110) + 3;
-      int m3 = map(ch3, -100, 100, 0, 180)+10;
+      int servo_trim = 3; // servo trim used to find center position of a servo 
+      m1 = map(m1, -100, 100, 110, 70) + servo_trim;
+      m2 = map(m2, -100, 100, 70, 110) + servo_trim;
+     
+      int m3 = map(ch3, -100, 100, 0, 180) + 10;
       int m4 = map(ch4, -100, 100, 0, 180);
       s1.write(m1);
       s2.write(m2);
