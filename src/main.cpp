@@ -12,20 +12,10 @@ const char *inTopic = "tank/in";          //MQTT topic for control messages
 const char *mqtt_server = "192.168.0.19"; //my defauld MQTT server
 const char *mqtt_server1 = "test.mosquitto.org";
 
-//PINS
-//bumpers, if the pin is LOW the bumper is active, pulled HIGH with internal pullups
-const int PIN_BBL = D1; //pin for Bumper Back Left
-const int PIN_BBR = D2; //pin for Bumper Back RIght
-const int PIN_BFR = D5; //pin for Bumper Front Left
-const int PIN_BFL = D6; //pin for Bumper Front Right
-
 const int servo1 = D4; //servo driving the wheel
 const int servo2 = D3; //servo driving the wheel
 
-const int servo3 = D7; //extra servo - used for camera gimbal
-const int servo4 = D8; //extra servo - used for camera gimbal
-
-const int PIN_LED = D0; // LED lights
+const int PIN_LED = LED_BUILTIN; // LED lights
 
 char buffer1[20]; //multiusage
 WiFiClient espClient;
@@ -33,21 +23,9 @@ PubSubClient client(espClient); //MQTT
 
 Servo s1;
 Servo s2;
-Servo s3;
-Servo s4;
 
-int BBL, BBR, BFR, BFL;
-
-void checkBumpers()
-{
-  BBL = digitalRead(PIN_BBL);
-  BBR = digitalRead(PIN_BBR);
-  BFR = digitalRead(PIN_BFR);
-  BFL = digitalRead(PIN_BFL);
-
-  //turn on LED when bumpers are active
-  digitalWrite(PIN_LED, !BBL || !BBR || !BFR || !BFL);
-}
+int servo_trim1 = 3; // servo trim used to find center position of a servo
+int servo_trim2 = 3; // servo trim used to find center position of a servo
 
 void callback(char *topic, byte *payload, unsigned int length)
 {
@@ -88,19 +66,6 @@ void callback(char *topic, byte *payload, unsigned int length)
           s2.attach(servo2); //attach servo when needed
       }
 
-      if (ch3 == 0 && ch4 == 0) //stop
-      {
-        s3.detach(); //detach to prevent servo drift
-        s4.detach();
-      }
-      else
-      {
-        if (!s3.attached())
-          s3.attach(servo3);
-        if (!s4.attached())
-          s4.attach(servo4);
-      }
-
       //chanel mixer
       int m1 = ch2 - ch1;
       int m2 = ch2 + ch1;
@@ -113,32 +78,11 @@ void callback(char *topic, byte *payload, unsigned int length)
       if (m2 < -100)
         m2 = -100;
 
-      if (BFR == LOW || BFL == LOW) //stop forward if front bumper activated
-      {
-        if (m1 > 0)
-          m1 = 0;
-        if (m2 > 0)
-          m2 = 0;
-      }
+      m1 = map(m1, -100, 100, 110, 70) + servo_trim1;
+      m2 = map(m2, -100, 100, 70, 110) + servo_trim2;
 
-      if (BBR == LOW || BBL == LOW) //stop backward if back bumper activated
-      {
-        if (m1 < 0)
-          m1 = 0;
-        if (m2 < 0)
-          m2 = 0;
-      }
-
-      int servo_trim = 3; // servo trim used to find center position of a servo
-      m1 = map(m1, -100, 100, 110, 70) + servo_trim;
-      m2 = map(m2, -100, 100, 70, 110) + servo_trim;
-
-      int m3 = map(ch3, -100, 100, 0, 180) + 10;
-      int m4 = map(ch4, -100, 100, 0, 180);
       s1.write(m1);
       s2.write(m2);
-      s3.write(m3);
-      s4.write(m4);
 
       //debug
       Serial.print(ch1);
@@ -181,10 +125,6 @@ void reconnect()
 /////////////////////////////////////////////////////////////
 void setup()
 {
-  pinMode(PIN_BBL, INPUT_PULLUP);
-  pinMode(PIN_BBR, INPUT_PULLUP);
-  pinMode(PIN_BFR, INPUT_PULLUP);
-  pinMode(PIN_BFL, INPUT_PULLUP);
   pinMode(PIN_LED, OUTPUT);
 
   Serial.begin(115200);
@@ -226,29 +166,17 @@ void setup()
   ArduinoOTA.begin();
   //OTA END
 
-  //power on behaviour
-  checkBumpers();
-  if (BFL == LOW) //connect to server1 when front left bumper activated during power on
-  {
-    client.setServer(mqtt_server1, 1883);
-    for (int i = 0; i < 5; i++) //blink 5 times with led to confirm
-    {
-      digitalWrite(PIN_LED, HIGH);
-      delay(50);
-      digitalWrite(PIN_LED, LOW);
-      delay(50);
-    }
-  }
-  else
-  {
-    client.setServer(mqtt_server, 1883);
-  }
+  client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
 
   //blink led
-  digitalWrite(PIN_LED, HIGH);
-  delay(500);
-  digitalWrite(PIN_LED, LOW);
+  for (int i = 0; i < 10; i++)
+  {
+    digitalWrite(PIN_LED, LOW);
+    delay(50);
+    digitalWrite(PIN_LED, HIGH);
+    delay(50);
+  }
 }
 
 void loop()
@@ -261,12 +189,10 @@ void loop()
   else
     client.loop();
 
-  checkBumpers();
-
   //send telemetry every 200ms
   if (millis() % 200 == 0)
   {
-    sprintf(buffer1, "T;%d;RSSI=%d;%d;%d;%d;%d", millis() / 1000, WiFi.RSSI(), BBL, BBR, BFR, BFL);
+    sprintf(buffer1, "T;%d;RSSI=%d;", (millis() / 1000), WiFi.RSSI());
     client.publish(outTopic, buffer1);
   }
 }
