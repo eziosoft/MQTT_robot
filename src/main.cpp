@@ -5,6 +5,10 @@
 #include <PubSubClient.h>
 #include <ArduinoOTA.h>
 #include <Servo.h>
+#include <Wire.h>
+#include <Adafruit_INA219.h>
+
+Adafruit_INA219 ina219;
 
 const char *ssid = "Robot";               //robot creates wifi hotspot when wifi connection is not configured
 const char *outTopic = "tank/out";        //MQTT topic for robot telemetry messages
@@ -17,15 +21,17 @@ const int servo2 = D3; //servo driving the wheel
 
 const int PIN_LED = LED_BUILTIN; // LED lights
 
-char buffer1[20]; //multiusage
+char buffer1[100]; //multiusage
 WiFiClient espClient;
 PubSubClient client(espClient); //MQTT
 
 Servo s1;
 Servo s2;
 
-int servo_trim1 = 3; // servo trim used to find center position of a servo
-int servo_trim2 = 3; // servo trim used to find center position of a servo
+int servo_trim1 = -2; // servo trim used to find center position of a servo
+int servo_trim2 = 1;  // servo trim used to find center position of a servo
+
+float consumption_mAh = 0;
 
 void callback(char *topic, byte *payload, unsigned int length)
 {
@@ -53,22 +59,22 @@ void callback(char *topic, byte *payload, unsigned int length)
       int ch3 = payload[4] - 100;
       int ch4 = payload[5] - 100;
 
-      if (ch1 == 0 && ch2 == 0) //stop
-      {
-        s1.detach(); //detach to prevent servo drift when stationary and also saves power
-        s2.detach(); //detach to prevent servo drift when stationary and also saves power
-      }
-      else
-      {
-        if (!s1.attached())
-          s1.attach(servo1); //attach servo when needed
-        if (!s2.attached())
-          s2.attach(servo2); //attach servo when needed
-      }
+      // if (ch1 == 0 && ch2 == 0) //stop
+      // {
+      //   s1.detach(); //detach to prevent servo drift when stationary and also saves power
+      //   s2.detach(); //detach to prevent servo drift when stationary and also saves power
+      // }
+      // else
+      // {
+      //   if (!s1.attached())
+      //     s1.attach(servo1); //attach servo when needed
+      //   if (!s2.attached())
+      //     s2.attach(servo2); //attach servo when needed
+      // }
 
       //chanel mixer
-      int m1 = ch2 - ch1;
-      int m2 = ch2 + ch1;
+      int m1 = ch2 + ch1;
+      int m2 = ch2 - ch1;
       if (m1 > 100)
         m1 = 100;
       if (m1 < -100)
@@ -80,6 +86,11 @@ void callback(char *topic, byte *payload, unsigned int length)
 
       m1 = map(m1, -100, 100, 110, 70) + servo_trim1;
       m2 = map(m2, -100, 100, 70, 110) + servo_trim2;
+
+      if (!s1.attached())
+        s1.attach(servo1); //attach servo when needed
+      if (!s2.attached())
+        s2.attach(servo2); //attach servo when needed
 
       s1.write(m1);
       s2.write(m2);
@@ -107,7 +118,7 @@ void reconnect()
     {
       Serial.println("connected");
       // Once connected, publish an announcement...
-      client.publish(outTopic, "Tank READY");
+      client.publish(outTopic, "ROBOT READY");
       // ... and resubscribe
       client.subscribe(inTopic);
     }
@@ -177,6 +188,17 @@ void setup()
     digitalWrite(PIN_LED, HIGH);
     delay(50);
   }
+
+  if (!ina219.begin())
+  {
+    Serial.println("Failed to find INA219 chip");
+    while (1)
+    {
+      delay(10);
+    }
+  }
+
+  Wire.setClock(400000);
 }
 
 void loop()
@@ -190,9 +212,19 @@ void loop()
     client.loop();
 
   //send telemetry every 200ms
-  if (millis() % 200 == 0)
+  if (millis() % 1000 == 0)
   {
-    sprintf(buffer1, "T;%d;RSSI=%d;", (millis() / 1000), WiFi.RSSI());
+
+    // // float shuntvoltage = ina219.getShuntVoltage_mV();
+    float busvoltage = ina219.getBusVoltage_V();
+    float current_mA = ina219.getCurrent_mA();
+    consumption_mAh = consumption_mAh + current_mA / 3600;
+    Serial.print(busvoltage);
+    Serial.print(" ");
+    Serial.println(current_mA);
+
+    // sprintf(buffer1, "T;%d;RSSI=%d;%f;%fmA", (millis() / 1000),int( WiFi.RSSI()),  busvoltage, current_mA);
+    sprintf(buffer1, "TS;%d;%d;%.2f;%.2f;%.2f", (millis() / 1000), WiFi.RSSI(), busvoltage, current_mA, consumption_mAh);
     client.publish(outTopic, buffer1);
   }
 }
